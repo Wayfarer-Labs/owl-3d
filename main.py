@@ -44,7 +44,6 @@ import torch
 from torch import Tensor
 from PIL import Image
 
-# Import the plucker_ray function
 from plucker import plucker_ray
 
 

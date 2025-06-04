@@ -1,3 +1,5 @@
+# https://github.com/DL3DV-10K/Dataset/blob/main/scripts/download.py
+
 """ This script is used to download the DL3DV-10 dataset for all resolution levels from the huggingface repo.
     As the whole dataset is too large for most users, we provide this script so that you can download the dataset efficiently based on your needs.
     We provide several options to download the dataset (image frames with poses):
