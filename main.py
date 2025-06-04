@@ -87,12 +87,18 @@ def load_images_as_tensor(image_folder):
     for img_path in all_files:
         with Image.open(img_path) as img:
             img = img.convert("RGB")  # ensure 3-channel
-            arr = torch.from_numpy(torch.ByteTensor(torch.ByteStorage.from_buffer(img.tobytes())))
-            # Pillow's raw buffer is H×W×3 in “RGB” byte order; we need to reshape then permute
-            w, h = img.size
-            arr = arr.view(h, w, 3)           # shape (H, W, 3), dtype=torch.uint8
-            arr = arr.permute(2, 0, 1).contiguous()  # (3, H, W)
+            # this is a bytes object of length (H * W * C)
+            tbuff = torch.frombuffer(bytearray(img.tobytes()), dtype=torch.uint8).clone()
+
+            H, W = img.height, img.width
+            C = len(img.getbands())  # 3 for "RGB", 1 for "L", etc.
+            tbuff = tbuff.view(H, W, C)
+
+            # from (H, W, C) → (C, H, W)
+            arr = tbuff.permute(2, 0, 1)
+
             tensors.append(arr)
+
     # Stack into (N, 3, H, W)
     video_tensor = torch.stack(tensors, dim=0)
     return video_tensor
@@ -132,11 +138,11 @@ def save_scene_tensor(scene_folder, out_tensor_folder):
     Returns the path to the .pt file.
     """
     scene_hash = os.path.basename(scene_folder.rstrip("/"))
-    image_folder = os.path.join(scene_folder, "images")
+    image_folder = os.path.join(scene_folder, "images_4")
     pose_file   = os.path.join(scene_folder, "transforms.json")
 
     if not os.path.isdir(image_folder):
-        raise RuntimeError(f"Expected an “images/” subfolder in {scene_folder}")
+        raise RuntimeError(f"Expected an “images_4/” subfolder in {scene_folder}")
     if not os.path.isfile(pose_file):
         raise RuntimeError(f"Expected a “transforms.json” file in {scene_folder}")
 
