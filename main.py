@@ -3,14 +3,7 @@
 tensorfy_and_chunk.py
 
 1. Traverses an input root directory of the form:
-       <input_root>/1K/<sc    scene_hash = os.path.basename(scene_folder.rstrip("/"))
-    image_folder = os.path.join(scene_folder, "images_4")
-    pose_file   = os.path.join(scene_folder, "transforms.json")
-
-    if not os.path.isdir(image_folder):
-        raise RuntimeError(f"Expected an "images_4/" subfolder in {scene_folder}")
-    if not os.path.isfile(pose_file):
-        raise RuntimeError(f"Expected a "transforms.json" file in {scene_folder}")id>/
+       <input_root>/1K/<scene_hashid>/
    where each <scene_hashid> folder contains:
        - a subfolder “images/” with image files (e.g. frame0001.jpg, frame0002.jpg, …)
        - a “poses.json” file containing camera poses (as a list or array)
@@ -44,10 +37,15 @@ import argparse
 import tarfile
 from glob import glob
 from math import floor
+from typing import Tuple
 
 from tqdm import tqdm
 import torch
+from torch import Tensor
 from PIL import Image
+
+# Import the plucker_ray function
+from plucker import plucker_ray
 
 
 def parse_args():
@@ -67,7 +65,6 @@ def parse_args():
         help="Target maximum size (in MB) per tar file. Defaults to 100 MB."
     )
     return p.parse_args()
-
 
 def load_images_as_tensor(image_folder):
     """
@@ -107,11 +104,30 @@ def load_images_as_tensor(image_folder):
 def load_poses_as_tensor(json_path):
     """
     Load transforms.json, which contains a more complex structure including camera parameters
-    and frames with transform_matrix information. We extract the frames' transform_matrix data
-    and the applied_transform, and convert to torch.float32 tensor.
+    and frames with transform_matrix information. We extract:
+    1. Camera intrinsics (fx, fy, cx, cy)
+    2. Transform matrices for each frame
+    
+    Returns a tuple of:
+    - camera_intrinsics: torch.float32 tensor with [fx, fy, cx, cy]
+    - poses_tensor: torch.float32 tensor with transform matrices for each frame
     """
     with open(json_path, "r") as f:
         data = json.load(f)
+    
+    # Extract camera intrinsics
+    fl_x = data.get("fl_x")
+    fl_y = data.get("fl_y")
+    cx = data.get("cx")
+    cy = data.get("cy")
+    w = data.get("w")  # Image width
+    h = data.get("h")  # Image height
+    
+    if None in (fl_x, fl_y, cx, cy, w, h):
+        raise RuntimeError(f"Missing camera intrinsics in {json_path}")
+    
+    # Create camera intrinsics tensor [fx, fy, cx, cy]
+    camera_intrinsics = torch.tensor([fl_x, fl_y, cx, cy], dtype=torch.float32)
     
     # Extract the transform matrices from each frame
     transform_matrices = []
@@ -119,22 +135,20 @@ def load_poses_as_tensor(json_path):
         if "transform_matrix" in frame:
             transform_matrices.append(frame["transform_matrix"])
     
-    # Also include the applied_transform if present
-    if "applied_transform" in data:
-        # We might want to process this separately or include it with each frame
-        applied_transform = data["applied_transform"]
-    
     # Convert to torch tensor (float32)
     poses_tensor = torch.tensor(transform_matrices, dtype=torch.float32)
-    return poses_tensor
+    
+    return camera_intrinsics, poses_tensor, (h, w)
 
 
 def save_scene_tensor(scene_folder, out_tensor_folder):
     """
     For a single scene_folder (…/1K/<scene_hashid>/):
-      - load “images/” → video_tensor (Nx3xHxW)
-      - load “poses.json” → poses_tensor
-      - save torch.save({"images":…, "poses":…}, out_tensor_folder/<scene_hashid>.pt)
+      - load "images/" → video_tensor (Nx3xHxW)
+      - load "transforms.json" → camera_intrinsics, poses_tensor
+      - calculate Plucker coordinates from poses and images
+      - concatenate RGB (3 channels) with Plucker (6 channels) → (Nx9xHxW)
+      - save torch.save({"features": combined_tensor}, out_tensor_folder/<scene_hashid>.pt)
     Returns the path to the .pt file.
     """
     scene_hash = os.path.basename(scene_folder.rstrip("/"))
@@ -148,9 +162,10 @@ def save_scene_tensor(scene_folder, out_tensor_folder):
 
     # 1) load images
     video_tensor = load_images_as_tensor(image_folder)  # shape: (N, 3, H, W)
+    N, C, H, W = video_tensor.shape  # N: number of frames, C: channels (3), H: height, W: width
 
-    # 2) load poses
-    poses_tensor = load_poses_as_tensor(pose_file)      # shape: (N, …)
+    # 2) load poses and camera intrinsics
+    camera_intrinsics, poses_tensor, (json_H, json_W) = load_poses_as_tensor(pose_file)
 
     # 3) sanity check: same number of frames?
     if poses_tensor.shape[0] != video_tensor.shape[0]:
@@ -158,17 +173,52 @@ def save_scene_tensor(scene_folder, out_tensor_folder):
             f"Warning: scene {scene_hash}: #images={video_tensor.shape[0]} "
             f"but poses.shape[0]={poses_tensor.shape[0]}. Proceeding anyway."
         )
+        # Use the minimum number of frames between the two
+        N = min(poses_tensor.shape[0], video_tensor.shape[0])
+        video_tensor = video_tensor[:N]
+        poses_tensor = poses_tensor[:N]
 
-    # 4) save
+    # 4) calculate Plucker coordinates
+    # Reshape poses_tensor to match the expected input shape for plucker_ray
+    # plucker_ray expects C2W with shape (B, V, 4, 4)
+    # Here B=1 (batch size), V=N (number of frames/views)
+    C2W = poses_tensor.unsqueeze(0)  # Shape: (1, N, 4, 4)
+    
+    # Reshape camera_intrinsics to match expected input shape for plucker_ray
+    # plucker_ray expects fxfycxcy with shape (B, V, 4)
+    fxfycxcy = camera_intrinsics.unsqueeze(0).expand(1, N, 4)  # Shape: (1, N, 4)
+    
+    # Calculate Plucker coordinates
+    plucker_tensor, (ray_o, ray_d) = plucker_ray(H, W, C2W, fxfycxcy)
+    
+    # Reshape plucker_tensor to match video_tensor dimensions
+    # It currently has shape (1, N, 6, H, W), we want (N, 6, H, W)
+    plucker_tensor = plucker_tensor.squeeze(0)  # Shape: (N, 6, H, W)
+    
+    # Normalize video_tensor from [0, 255] to [0, 1] for consistency
+    video_tensor_float = video_tensor.float() / 255.0  
+    
+    # Convert tensors to bfloat16 for memory efficiency
+    video_tensor_bfloat16 = video_tensor_float.to(torch.bfloat16)
+    plucker_tensor_bfloat16 = plucker_tensor.to(torch.bfloat16)
+    
+    # 5) Concatenate video_tensor (RGB) with plucker_tensor (6 channels)
+    # along the channel dimension to get a 9-channel tensor in bfloat16
+    combined_tensor = torch.cat([video_tensor_bfloat16, plucker_tensor_bfloat16], dim=1)  # Shape: (N, 9, H, W)
+
+    print(f"Scene {scene_hash}: "
+          f"video_tensor shape={video_tensor.shape}, "
+          f"poses_tensor shape={poses_tensor.shape}, "
+          f"combined_tensor shape={combined_tensor.shape}")
+    print(f"size of combined_tensor: {combined_tensor.numel() * combined_tensor.element_size() / (1024 * 1024):.2f} MB")
+    print(f"type of combined_tensor: {combined_tensor.dtype}")
+
+    # 6) save
     os.makedirs(out_tensor_folder, exist_ok=True)
     out_path = os.path.join(out_tensor_folder, f"{scene_hash}.pt")
-    torch.save(video_tensor, out_path)  # save video tensor first
-        # "images": video_tensor,
-        # "poses": poses_tensor
-        # , out_path)
+    torch.save(combined_tensor, out_path)
 
     return out_path
-
 
 def chunk_and_tar(pt_paths, tar_folder, chunk_size_bytes):
     """

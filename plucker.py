@@ -1,5 +1,8 @@
+from typing import *
+import torch
+
 # https://github.com/chenguolin/DiffSplat/blob/main/src/utils/geo_util.py
-def plucker_ray(h: int, w: int, C2W: Tensor, fxfycxcy: Tensor, bug: bool = True) -> Tuple[Tensor, Tuple[Tensor, Tensor]]:
+def plucker_ray(h: int, w: int, C2W: torch.Tensor, fxfycxcy: torch.Tensor, bug: bool = True) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
     """Get Plucker ray embeddings.
 
     Inputs:
