@@ -32,6 +32,8 @@ You can adjust --chunk_size_mb if you want smaller/larger tar files.
 
 import os
 import sys
+import shutil
+
 import json
 import argparse
 import tarfile
@@ -62,6 +64,10 @@ def parse_args():
     p.add_argument(
         "--chunk_size_mb", type=float, default=100.0,
         help="Target maximum size (in MB) per tar file. Defaults to 100 MB."
+    )
+    p.add_argument(
+        "--keep_intermediate", action="store_true",
+        help="If set, will delete the intermediate .pt files after creating the tarballs."
     )
     return p.parse_args()
 
@@ -287,7 +293,7 @@ if __name__ == "__main__":
 
     # 2) Prepare output subfolders
     tensors_folder = os.path.join(output_root, "tensors")
-    archives_folder = os.path.join(output_root, "archives")
+    archives_folder = output_root
     os.makedirs(tensors_folder, exist_ok=True)
     os.makedirs(archives_folder, exist_ok=True)
 
@@ -304,6 +310,16 @@ if __name__ == "__main__":
     # 4) Once all .pt files exist, chunk them into ~100 MB tar files
     print(f"\nNow chunking {len(pt_paths)} “.pt” files into ≈{args.chunk_size_mb} MB tarballs…")
     chunk_and_tar(pt_paths, archives_folder, chunk_bytes)
+
+    # Clean up intermediate directories if requested
+    if not args.keep_intermediate:
+        print("Cleaning up intermediate files...")
+        print(f"Removing {len(pt_paths)} intermediate pt files…")
+        try:
+            shutil.rmtree(tensors_folder)
+        except Exception as e:
+            print(f"Warning: Failed to remove {tensors_folder}: {e}")
+        print("Cleanup completed.")
 
     print("\nDone! You'll find:")
     print(f"  • One “.pt” file per scene under  {tensors_folder}/")

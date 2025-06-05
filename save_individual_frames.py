@@ -10,12 +10,21 @@ This script provides an alternative to `save_scene_tensor` that:
    - 0000.int.pt: The intrinsics parameters as a tensor
 3. After processing all scenes, it groups them into N tarballs
    such that each tarball is no larger than the specified size.
+4. By default, it cleans up the intermediate files after creating tarballs
+   to save disk space, leaving only the compressed archives.
 
 Usage:
     python save_individual_frames.py \
        --input_root PATH/TO/DATASET_ROOT \
        --output_root ./processed_frames \
-       --chunk_size_mb 100
+       --chunk_size_mb 200
+       
+    # To keep intermediate files after creating tarballs:
+    python save_individual_frames.py \
+       --input_root PATH/TO/DATASET_ROOT \
+       --output_root ./processed_frames \
+       --chunk_size_mb 200 \
+       --keep_intermediate
 """
 
 import os
@@ -46,6 +55,10 @@ def parse_args():
     p.add_argument(
         "--chunk_size_mb", type=float, default=100.0,
         help="Target maximum size (in MB) per tar file. Defaults to 100 MB."
+    )
+    p.add_argument(
+        "--keep_intermediate", action="store_true",
+        help="Keep intermediate frame files after creating tarballs (default: clean up to save space)"
     )
     return p.parse_args()
 
@@ -148,11 +161,17 @@ def save_frames_individually(scene_folder, out_frames_folder):
     print(f"Saved {num_frames} frames for scene {scene_hash}")
     return scene_out_dir
 
-def chunk_and_tar(scene_dirs, archives_folder, chunk_size_bytes):
+def chunk_and_tar(scene_dirs, archives_folder, chunk_size_bytes, cleanup_intermediate=True):
     """
     Given a list of scene directories, group them into tars so that
     each tar's total size (sum of the dir sizes) is ≤ chunk_size_bytes (as best as possible).
     We name them: archive_000.tar, archive_001.tar, etc.
+    
+    Args:
+        scene_dirs: List of scene directory paths to archive
+        archives_folder: Folder where to save the tar files
+        chunk_size_bytes: Maximum size per tar file
+        cleanup_intermediate: If True, delete the intermediate directories after archiving
     """
     os.makedirs(archives_folder, exist_ok=True)
 
@@ -195,6 +214,16 @@ def chunk_and_tar(scene_dirs, archives_folder, chunk_size_bytes):
     # after loop, close the last tar
     if current_tar is not None:
         current_tar.close()
+    
+    # Clean up intermediate directories if requested
+    if cleanup_intermediate:
+        print("Cleaning up intermediate files...")
+        for scene_dir in tqdm(scene_dirs, desc="Removing intermediate directories"):
+            try:
+                shutil.rmtree(scene_dir)
+            except Exception as e:
+                print(f"Warning: Failed to remove {scene_dir}: {e}")
+        print("Cleanup completed.")
 
 def process_all_scenes(input_root, output_root, chunk_size_bytes=None):
     """
@@ -232,11 +261,10 @@ def process_all_scenes(input_root, output_root, chunk_size_bytes=None):
 
     # If chunk_size_bytes is provided, create archive tarballs
     if chunk_size_bytes:
-        # Create archives folder - make it consistent with main.py structure
-        archives_folder = os.path.join(output_root, "archives")
+        # Store tarballs directly in the output_root directory
         print(f"\nNow chunking {len(processed_scenes)} scene directories into ≈{chunk_size_bytes/(1024*1024):.1f} MB tarballs…")
-        chunk_and_tar(processed_scenes, archives_folder, chunk_size_bytes)
-        return processed_scenes, archives_folder
+        chunk_and_tar(processed_scenes, output_root, chunk_size_bytes, cleanup_intermediate=not args.keep_intermediate)
+        return processed_scenes, output_root
     
     return processed_scenes, None
 
@@ -246,14 +274,15 @@ if __name__ == "__main__":
     input_root = os.path.abspath(args.input_root)
     output_root = os.path.abspath(args.output_root)
     chunk_bytes = int(floor(args.chunk_size_mb * 1024 * 1024)) if args.chunk_size_mb else None
-    
-    # Prepare output directories - match structure in main.py
-    frames_folder = os.path.join(output_root, "frames")
-    os.makedirs(frames_folder, exist_ok=True)
-    
-    processed_scenes, archives_folder = process_all_scenes(input_root, frames_folder, chunk_bytes)
+
+    processed_scenes, archives_folder = process_all_scenes(input_root, output_root, chunk_bytes)
     
     print("\nDone! You'll find:")
-    print(f"  • Individual frames and their parameters under {frames_folder}/<scene_hash>/")
     if archives_folder:
-        print(f"  • A series of tarballs under {archives_folder}/ (each ≤ {args.chunk_size_mb} MB)")
+        print(f"  • A series of tarballs in {archives_folder}/ (each ≤ {args.chunk_size_mb} MB)")
+        if not args.keep_intermediate:
+            print("  • Intermediate frame files have been cleaned up to save space")
+        else:
+            print(f"  • Individual frames and their parameters under {frames_folder}/<scene_hash>/ (kept as requested)")
+    else:
+        print(f"  • Individual frames and their parameters under {frames_folder}/<scene_hash>/")

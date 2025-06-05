@@ -2,13 +2,10 @@
 """
 upload_s3.py
 
-A script to upload tensor files with shape [N, 9, 540, 960] to the Tigris S3 bucket.
-This script can handle both:
-1. Full scene tensors (from main.py)
-2. Individual frame files (from save_frames_no_plucker.py)
+A script to upload tarball files to the Tigris S3 bucket.
 
 Usage:
-    python upload_s3.py --input_dir /path/to/tensors --bucket tigris-bucket-name
+    python upload_s3.py --input_dir /path/to/tarballs --bucket tigris-bucket-name
 """
 
 import os
@@ -18,16 +15,15 @@ import time
 from glob import glob
 from pathlib import Path
 
-import torch
 from tqdm import tqdm
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="Upload tensor files to Tigris S3 bucket"
+        description="Upload tarball files to Tigris S3 bucket"
     )
     p.add_argument(
         "--input_dir", required=True,
-        help="Directory containing tensor files (.pt) to upload"
+        help="Directory containing tarball files (.tar, .tar.gz, .tgz) to upload"
     )
     p.add_argument(
         "--bucket", required=True,
@@ -43,45 +39,43 @@ def parse_args():
     )
     return p.parse_args()
 
-def validate_tensor(file_path):
+def validate_tarball(file_path):
     """
-    Validate that a tensor file contains data with the expected shape [N, 9, 540, 960]
-    Returns a tuple of (is_valid, tensor_shape, tensor_type)
+    Validate that a file is a valid tarball
+    Returns a tuple of (is_valid, file_size, file_type)
     """
     try:
-        # Load the tensor
-        tensor = torch.load(file_path)
+        import tarfile
         
-        # Check if it's a tensor or a dictionary
-        if isinstance(tensor, dict):
-            if "features" in tensor:
-                tensor = tensor["features"]
-            elif "images" in tensor and "poses" in tensor:
-                # Legacy format, needs conversion
-                return (False, str(tensor["images"].shape), "legacy")
-        
-        # Check the shape
-        shape = tensor.shape
-        if len(shape) == 4 and shape[1] == 9:  # [N, 9, H, W]
-            return (True, shape, tensor.dtype)
+        # Check if it's a valid tarball
+        if tarfile.is_tarfile(file_path):
+            size = os.path.getsize(file_path)
+            # Determine the type based on extension
+            ext = os.path.splitext(file_path)[1]
+            if ext in ['.gz', '.bz2', '.xz']:
+                file_type = f"compressed ({ext})"
+            else:
+                file_type = "uncompressed"
+            
+            return (True, f"{size / (1024 * 1024):.2f} MB", file_type)
         else:
-            return (False, shape, tensor.dtype)
+            return (False, "Not a valid tarball", None)
     
     except Exception as e:
         return (False, f"Error: {e}", None)
 
-def list_tensor_files(input_dir):
+def list_tarball_files(input_dir):
     """
-    Find all tensor files in the input directory
+    Find all tarball files in the input directory
     """
-    # Look for .pt files recursively
+    # Look for common tarball extensions recursively
     all_files = []
-    for ext in [".pt"]:
+    for ext in [".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tar.xz"]:
         pattern = os.path.join(input_dir, f"**/*{ext}")
         all_files.extend(glob(pattern, recursive=True))
     
     if not all_files:
-        print(f"Error: No tensor files found in {input_dir}")
+        print(f"Error: No tarball files found in {input_dir}")
         return []
     
     return sorted(all_files)
@@ -147,33 +141,33 @@ def main():
     # Create S3 client
     s3_client = boto3.client('s3')
     
-    # List tensor files
-    print(f"Searching for tensor files in {args.input_dir}...")
-    tensor_files = list_tensor_files(args.input_dir)
+    # List tarball files
+    print(f"Searching for tarball files in {args.input_dir}...")
+    tarball_files = list_tarball_files(args.input_dir)
     
-    if not tensor_files:
+    if not tarball_files:
         print("No files to upload. Exiting.")
         sys.exit(1)
     
-    # Validate tensors
-    print(f"Found {len(tensor_files)} files. Validating...")
+    # Validate tarballs
+    print(f"Found {len(tarball_files)} files. Validating...")
     valid_files = []
     invalid_files = []
     
-    for file_path in tqdm(tensor_files, desc="Validating"):
-        is_valid, shape, dtype = validate_tensor(file_path)
+    for file_path in tqdm(tarball_files, desc="Validating"):
+        is_valid, file_size, file_type = validate_tarball(file_path)
         if is_valid:
             valid_files.append(file_path)
         else:
-            invalid_files.append((file_path, shape, dtype))
+            invalid_files.append((file_path, file_size, file_type))
     
     # Report validation results
     print(f"Validation complete: {len(valid_files)} valid, {len(invalid_files)} invalid.")
     
     if invalid_files:
         print("\nInvalid files:")
-        for path, shape, dtype in invalid_files:
-            print(f"  {path}: Shape {shape}, Type {dtype}")
+        for path, file_size, file_type in invalid_files:
+            print(f"  {path}: {file_size}, {file_type}")
     
     if not valid_files:
         print("No valid files to upload. Exiting.")

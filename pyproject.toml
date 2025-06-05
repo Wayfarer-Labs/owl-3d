@@ -10,6 +10,7 @@ dependencies = [
     "pillow>=11.2.1",
     "tqdm>=4.67.1",
     "torch>=2.6.0",
+    "boto3>=1.38.30",
 ]
 
 # Then, add the PyTorch CPU index as an explicit source for torch/torchvision/torchaudio:
