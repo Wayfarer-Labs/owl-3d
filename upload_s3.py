@@ -6,6 +6,18 @@ A script to upload tarball files to the Tigris S3 bucket.
 
 Usage:
     python upload_s3.py --input_dir /path/to/tarballs --bucket tigris-bucket-name
+
+Required Environment Variables:
+    AWS_ACCESS_KEY_ID       - Your AWS/Tigris access key ID
+    AWS_SECRET_ACCESS_KEY   - Your AWS/Tigris secret access key
+    AWS_REGION             - AWS region (optional, defaults to us-east-1)
+    AWS_ENDPOINT_URL       - Custom endpoint URL (optional, for Tigris or other S3-compatible services)
+
+Example:
+    export AWS_ACCESS_KEY_ID="your-access-key"
+    export AWS_SECRET_ACCESS_KEY="your-secret-key"
+    export AWS_ENDPOINT_URL="https://fly.storage.tigris.dev"
+    python upload_s3.py --input_dir ./archives --bucket my-bucket
 """
 
 import os
@@ -134,12 +146,55 @@ def main():
     
     try:
         import boto3
+        from botocore.exceptions import NoCredentialsError, PartialCredentialsError
     except ImportError:
         print("Error: boto3 is required. Please install it with 'pip install boto3'")
         sys.exit(1)
     
-    # Create S3 client
-    s3_client = boto3.client('s3')
+    # Get AWS credentials from environment variables
+    aws_access_key_id = os.environ.get('AWS_ACCESS_KEY_ID')
+    aws_secret_access_key = os.environ.get('AWS_SECRET_ACCESS_KEY')
+    aws_region = os.environ.get('AWS_REGION', 'us-east-1')  # Default to us-east-1
+    aws_endpoint_url = os.environ.get('AWS_ENDPOINT_URL')  # For Tigris or other S3-compatible services
+    
+    # Check if credentials are provided
+    if not aws_access_key_id or not aws_secret_access_key:
+        print("Error: AWS credentials not found in environment variables.")
+        print("Please set the following environment variables:")
+        print("  - AWS_ACCESS_KEY_ID")
+        print("  - AWS_SECRET_ACCESS_KEY")
+        print("  - AWS_REGION (optional, defaults to us-east-1)")
+        print("  - AWS_ENDPOINT_URL (optional, for Tigris or other S3-compatible services)")
+        sys.exit(1)
+    
+    # Create S3 client with credentials
+    try:
+        s3_client_config = {
+            'aws_access_key_id': aws_access_key_id,
+            'aws_secret_access_key': aws_secret_access_key,
+            'region_name': aws_region
+        }
+        
+        # Add endpoint URL if provided (for Tigris or other S3-compatible services)
+        if aws_endpoint_url:
+            s3_client_config['endpoint_url'] = aws_endpoint_url
+        
+        s3_client = boto3.client('s3', **s3_client_config)
+        
+        # Test the connection by listing buckets (optional verification)
+        print(f"Authenticating with AWS/S3 service...")
+        s3_client.head_bucket(Bucket=args.bucket)
+        print(f"✓ Successfully authenticated and verified access to bucket '{args.bucket}'")
+        
+    except NoCredentialsError:
+        print("Error: AWS credentials not found or invalid.")
+        sys.exit(1)
+    except PartialCredentialsError:
+        print("Error: Incomplete AWS credentials.")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error: Failed to authenticate or access bucket '{args.bucket}': {e}")
+        sys.exit(1)
     
     # List tarball files
     print(f"Searching for tarball files in {args.input_dir}...")
