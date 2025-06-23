@@ -173,7 +173,9 @@ class TSDFFusion(nn.Module):
         camera_pose: torch.Tensor,
         camera_intrinsics: torch.Tensor,
         frame_weight: float = 1.0,
-        confidence_map: Optional[torch.Tensor] = None
+        confidence_map: Optional[torch.Tensor] = None,
+        auto_confidence: bool = True,
+        confidence_method: str = "gradient_based"
     ):
         """
         Update TSDF volume with a new depth observation.
@@ -184,6 +186,8 @@ class TSDFFusion(nn.Module):
             camera_intrinsics: Camera intrinsics matrix of shape (3, 3)
             frame_weight: Base weight for this frame
             confidence_map: Optional confidence map of shape (H, W)
+            auto_confidence: Whether to automatically generate confidence from depth
+            confidence_method: Method for auto-generating confidence ("gradient_based", "smoothness", "combined")
         """
         # Compute TSDF values for this frame
         tsdf_values, valid_mask, _ = self.compute_tsdf_values(
@@ -194,15 +198,29 @@ class TSDFFusion(nn.Module):
         tsdf_values = tsdf_values.view(self.grid_dims.tolist())
         valid_mask = valid_mask.view(self.grid_dims.tolist())
         
-        # Apply confidence weighting if provided
+        # Handle confidence mapping
         if confidence_map is not None:
-            # Project confidence to voxel grid (simplified - you might want more sophisticated mapping)
-            voxel_confidence = torch.ones_like(tsdf_values) * frame_weight
-            # Apply confidence based on projection
-            # (This is a simplified version - in practice you'd need to properly map confidence)
-            weights = voxel_confidence * valid_mask.float()
+            # Use provided confidence map
+            voxel_confidence = self._map_confidence_to_voxels(
+                confidence_map, camera_pose, camera_intrinsics
+            )
+            # Reshape confidence to match volume grid
+            voxel_confidence = voxel_confidence.view(self.grid_dims.tolist())
+            weights = frame_weight * voxel_confidence * valid_mask.float()
+        elif auto_confidence:
+            # Generate confidence from depth
+            confidence_map = self.generate_depth_confidence(depth_map, confidence_method)
+            voxel_confidence = self._map_confidence_to_voxels(
+                confidence_map, camera_pose, camera_intrinsics
+            )
+            # Reshape confidence to match volume grid
+            voxel_confidence = voxel_confidence.view(self.grid_dims.tolist())
+            weights = frame_weight * voxel_confidence * valid_mask.float()
         else:
+            # Use uniform weighting
             weights = frame_weight * valid_mask.float()
+        
+        # No need to reshape weights again since they already match volume grid dimensions
         
         # Update TSDF volume using weighted averaging
         # D'(v) = (W(v) * D(v) + w_i * d_i(v)) / (W(v) + w_i)
@@ -307,6 +325,178 @@ class TSDFFusion(nn.Module):
             'mean_weight': self.weight_volume[self.weight_volume > 0].mean().item() if has_weights else 0,
             'max_weight': self.weight_volume.max().item() if self.weight_volume.numel() > 0 else 0.0,
         }
+    
+    def _map_confidence_to_voxels(
+        self,
+        confidence_map: torch.Tensor,
+        camera_pose: torch.Tensor,
+        camera_intrinsics: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Map 2D confidence map to 3D voxel confidence values with distance-based weighting.
+        
+        Args:
+            confidence_map: Confidence map of shape (H, W) with values in [0, 1]
+            camera_pose: Camera pose matrix of shape (4, 4) - camera to world
+            camera_intrinsics: Camera intrinsics matrix of shape (3, 3)
+            
+        Returns:
+            voxel_confidence: Confidence values for each voxel in the grid
+        """
+        # Transform voxel coordinates to camera frame
+        world_coords_homo = torch.cat([
+            self.voxel_coords, 
+            torch.ones(len(self.voxel_coords), 1, device=self.device)
+        ], dim=1)  # (N, 4)
+        
+        # Camera pose is cam2world, so we need world2cam
+        world2cam = torch.inverse(camera_pose)
+        cam_coords = (world2cam @ world_coords_homo.T).T[:, :3]  # (N, 3)
+        
+        # Project to image plane
+        pixel_coords = (camera_intrinsics @ cam_coords.T).T  # (N, 3)
+        pixel_coords = pixel_coords[:, :2] / (pixel_coords[:, 2:3] + 1e-8)  # (N, 2)
+        
+        # Check which voxels project within image bounds
+        H, W = confidence_map.shape
+        valid_projection = (
+            (pixel_coords[:, 0] >= 0) & (pixel_coords[:, 0] < W) &
+            (pixel_coords[:, 1] >= 0) & (pixel_coords[:, 1] < H) &
+            (cam_coords[:, 2] > 0)  # In front of camera
+        )
+        
+        # Initialize confidence values (default to 0 for invalid projections)
+        voxel_confidence = torch.zeros(len(self.voxel_coords), device=self.device)
+        
+        # Use bilinear interpolation to sample confidence values
+        if valid_projection.any():
+            valid_pixels = pixel_coords[valid_projection]
+            valid_depths = cam_coords[valid_projection, 2]  # Z coordinates
+            
+            # Bilinear interpolation
+            x = valid_pixels[:, 0]
+            y = valid_pixels[:, 1]
+            
+            # Get integer coordinates
+            x0 = torch.floor(x).long()
+            x1 = torch.clamp(x0 + 1, max=W - 1)
+            y0 = torch.floor(y).long()
+            y1 = torch.clamp(y0 + 1, max=H - 1)
+            
+            # Get fractional parts
+            fx = x - x0.float()
+            fy = y - y0.float()
+            
+            # Clamp coordinates to valid range
+            x0 = torch.clamp(x0, 0, W - 1)
+            x1 = torch.clamp(x1, 0, W - 1)
+            y0 = torch.clamp(y0, 0, H - 1)
+            y1 = torch.clamp(y1, 0, H - 1)
+            
+            # Sample confidence values at corners
+            c00 = confidence_map[y0, x0]
+            c01 = confidence_map[y1, x0]
+            c10 = confidence_map[y0, x1]
+            c11 = confidence_map[y1, x1]
+            
+            # Bilinear interpolation
+            interpolated_confidence = (
+                c00 * (1 - fx) * (1 - fy) +
+                c10 * fx * (1 - fy) +
+                c01 * (1 - fx) * fy +
+                c11 * fx * fy
+            )
+            
+            # Apply distance-based weighting (closer points get higher confidence)
+            # Use inverse distance weighting with a reasonable falloff
+            distance_weight = 1.0 / (1.0 + 0.1 * valid_depths)  # Gradual falloff
+            
+            # Combine image confidence with distance weighting
+            final_confidence = interpolated_confidence * distance_weight
+            
+            # Assign final confidence to valid voxels
+            voxel_confidence[valid_projection] = final_confidence
+        
+        return voxel_confidence
+    
+    def generate_depth_confidence(
+        self,
+        depth_map: torch.Tensor,
+        method: str = "gradient_based"
+    ) -> torch.Tensor:
+        """
+        Generate confidence map from depth information.
+        
+        Args:
+            depth_map: Input depth map of shape (H, W)
+            method: Method for confidence generation ("gradient_based", "smoothness", "combined")
+            
+        Returns:
+            confidence_map: Confidence values in [0, 1] of shape (H, W)
+        """
+        if method == "gradient_based":
+            return self._gradient_based_confidence(depth_map)
+        elif method == "smoothness":
+            return self._smoothness_based_confidence(depth_map)
+        elif method == "combined":
+            grad_conf = self._gradient_based_confidence(depth_map)
+            smooth_conf = self._smoothness_based_confidence(depth_map)
+            return 0.6 * grad_conf + 0.4 * smooth_conf
+        else:
+            raise ValueError(f"Unknown confidence method: {method}")
+    
+    def _gradient_based_confidence(self, depth_map: torch.Tensor) -> torch.Tensor:
+        """Generate confidence based on depth gradients (lower gradient = higher confidence)."""
+        # Compute depth gradients
+        grad_x = torch.abs(depth_map[:, 1:] - depth_map[:, :-1])
+        grad_y = torch.abs(depth_map[1:, :] - depth_map[:-1, :])
+        
+        # Pad to match original size
+        grad_x = torch.cat([grad_x, grad_x[:, -1:]], dim=1)
+        grad_y = torch.cat([grad_y, grad_y[-1:, :]], dim=0)
+        
+        # Combine gradients
+        gradient_magnitude = torch.sqrt(grad_x**2 + grad_y**2)
+        
+        # Convert to confidence (inverse relationship)
+        # Use sigmoid-like function to map to [0, 1]
+        confidence = torch.exp(-gradient_magnitude * 10.0)
+        
+        # Handle invalid depths
+        confidence[depth_map <= 0] = 0.0
+        
+        return confidence
+    
+    def _smoothness_based_confidence(self, depth_map: torch.Tensor) -> torch.Tensor:
+        """Generate confidence based on local depth smoothness."""
+        # Apply Gaussian filter for smoothing
+        from torch.nn.functional import conv2d
+        
+        # Create Gaussian kernel
+        kernel_size = 5
+        sigma = 1.0
+        kernel_1d = torch.exp(-0.5 * ((torch.arange(kernel_size, device=depth_map.device) - kernel_size // 2) / sigma)**2)
+        kernel_1d = kernel_1d / kernel_1d.sum()
+        kernel_2d = kernel_1d.unsqueeze(0) * kernel_1d.unsqueeze(1)
+        kernel_2d = kernel_2d.unsqueeze(0).unsqueeze(0)
+        
+        # Apply smoothing
+        depth_smooth = conv2d(
+            depth_map.unsqueeze(0).unsqueeze(0),
+            kernel_2d,
+            padding=kernel_size // 2
+        ).squeeze()
+        
+        # Compute difference from smooth version
+        smoothness_error = torch.abs(depth_map - depth_smooth)
+        
+        # Convert to confidence
+        confidence = torch.exp(-smoothness_error * 5.0)
+        
+        # Handle invalid depths
+        confidence[depth_map <= 0] = 0.0
+        
+        return confidence
 
 
 def demo_tsdf_fusion():

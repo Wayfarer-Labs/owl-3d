@@ -32,7 +32,7 @@ def load_data_for_tsdf(output_file):
 
 def process_with_tsdf_fusion(images, depths, intrinsic, cam_c2w, 
                            voxel_size=0.03, max_frames=50, 
-                           min_weight_threshold=3.0,
+                           min_weight_threshold=1.0,
                            device='cuda'):
     """
     Process the sequence through TSDF fusion to filter dynamic elements.
@@ -64,7 +64,7 @@ def process_with_tsdf_fusion(images, depths, intrinsic, cam_c2w,
         voxel_size=voxel_size,
         volume_bounds=bounds,
         truncation_distance=voxel_size * 2,  # 2x voxel size
-        max_weight=100.0,
+        max_weight=5.0,
         device=device
     )
     
@@ -130,7 +130,7 @@ def process_with_tsdf_fusion(images, depths, intrinsic, cam_c2w,
     
     return filtered_points, filtered_colors, tsdf_info
 
-def estimate_scene_bounds(depths, intrinsic, poses, percentile=95):
+def estimate_scene_bounds(depths, intrinsic, poses, percentile=95, padding: float = 0.5):
     """Estimate scene bounds from a few depth maps."""
     all_points = []
     
@@ -182,7 +182,6 @@ def estimate_scene_bounds(depths, intrinsic, poses, percentile=95):
     max_bounds = np.percentile(all_points, percentile, axis=0)
     
     # Add some padding
-    padding = 0.5
     min_bounds -= padding
     max_bounds += padding
     
@@ -382,13 +381,13 @@ def create_depth_video_with_info(output_file, video_path="cod_depth_video_with_t
         
         # Process with TSDF to get frame-by-frame info
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        bounds = estimate_scene_bounds(depths[:5], intrinsic, cam_c2w[:5])
+        bounds = estimate_scene_bounds(depths[:5], intrinsic, cam_c2w[:5], padding=0.5)
         
         tsdf = TSDFFusion(
             voxel_size=voxel_size,
             volume_bounds=bounds,
             truncation_distance=voxel_size * 2,
-            max_weight=100.0,
+            max_weight=5.0,
             device=device
         )
         
@@ -421,6 +420,7 @@ def create_depth_video_with_info(output_file, video_path="cod_depth_video_with_t
             intrinsic_torch = torch.from_numpy(intrinsic).float().to(device)
             
             frame_weight = 1.0 + (processed_count / max_frames) * 2.0
+            frame_weight = min(frame_weight, 3.0)  # Cap at 3.0
             tsdf.update_volume(depth_torch, pose_torch, intrinsic_torch, frame_weight)
             
             # Get TSDF info
