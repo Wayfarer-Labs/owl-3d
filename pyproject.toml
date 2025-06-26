@@ -5,19 +5,8 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "huggingface-hub>=0.32.4",
-    "pandas>=2.2.3",
-    "pillow>=11.2.1",
-    "tqdm>=4.67.1",
-    "torch>=2.6.0",
-    "boto3>=1.38.30",
+    "matplotlib>=3.10.3",
+    "numpy>=2.3.0",
+    "opencv-python>=4.11.0.86",
+    "torch>=2.7.1",
 ]
-
-# Then, add the PyTorch CPU index as an explicit source for torch/torchvision/torchaudio:
-[[tool.uv.index]]
-name     = "pytorch-cpu"
-url      = "https://download.pytorch.org/whl/cpu"
-explicit = true
-
-[tool.uv.sources]
-torch = [{ index = "pytorch-cpu" }]
