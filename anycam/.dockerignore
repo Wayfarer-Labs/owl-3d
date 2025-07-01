@@ -1,0 +1,22 @@
+# Docker ignore patterns
+.git
+.gitignore
+*.md
+!README_DOCKER.md
+*.pyc
+__pycache__/
+.pytest_cache/
+.coverage
+.env
+.venv
+venv/
+*.log
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.tar.gz
+*.zip
