@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     cmake \
     ninja-build \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Install OpenGL and X11 libraries separately to handle potential conflicts
@@ -64,14 +65,15 @@ RUN /bin/bash -c "source activate anycam && \
 WORKDIR /workspace
 
 # Clone the anycam repository
-RUN git clone --recursive https://github.com/Brummi/anycam.git
+# RUN git clone --recursive https://github.com/Brummi/anycam.git
+RUN git clone --recursive https://github.com/bmahlbrand/anycam.git
 
 # Change to anycam directory
 WORKDIR /workspace/anycam
 
 # Copy and install requirements
 RUN /bin/bash -c "source activate anycam && \
-    pip install -r requirements.txt"
+    pip install -r requirements.txt && pip install pillow matplotlib numpy"
 
 # Make download script executable and download pretrained models
 RUN chmod +x download_checkpoints.sh && \
@@ -81,7 +83,13 @@ RUN chmod +x download_checkpoints.sh && \
 # Copy test script and make it executable
 COPY test_installation.sh /workspace/
 COPY process_video.sh /workspace/
-RUN chmod +x /workspace/test_installation.sh /workspace/process_video.sh
+ARG INCUBATOR_VER=unknown
+
+COPY create_comparison_video.py /workspace/
+COPY create_comparison_video.sh /workspace/
+COPY create_simple_video.py /workspace/
+COPY create_simple_video.sh /workspace/
+RUN chmod +x /workspace/test_installation.sh /workspace/process_video.sh /workspace/create_comparison_video.sh /workspace/create_simple_video.sh
 
 # Create a startup script that activates the environment
 RUN echo '#!/bin/bash\nsource activate anycam\nexec "$@"' > /usr/local/bin/entrypoint.sh && \

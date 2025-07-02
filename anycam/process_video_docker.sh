@@ -157,8 +157,7 @@ CONTAINER_INPUT="/workspace/data/$(basename "$INPUT_PATH")"
 CONTAINER_OUTPUT="/workspace/outputs"
 
 # Build the AnyCam command
-ANYCAM_CMD="PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True"
-ANYCAM_CMD="$ANYCAM_CMD cd /workspace/anycam && python anycam/scripts/anycam_demo.py"
+ANYCAM_CMD="cd /workspace/anycam && python anycam/scripts/anycam_demo.py"
 ANYCAM_CMD="$ANYCAM_CMD ++input_path=$CONTAINER_INPUT"
 ANYCAM_CMD="$ANYCAM_CMD ++model_path=$MODEL_PATH"
 ANYCAM_CMD="$ANYCAM_CMD ++output_path=$CONTAINER_OUTPUT"
@@ -206,6 +205,7 @@ echo ""
 
 # Run the Docker container with the AnyCam command
 docker run $GPU_FLAGS -it --rm \
+    -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
     -v "$(dirname "$INPUT_PATH"):/workspace/data" \
     -v "$OUTPUT_PATH:/workspace/outputs" \
     -p 9090:9090 \
