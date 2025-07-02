@@ -9,7 +9,6 @@ set -e
 INPUT_VIDEO=""
 OUTPUT_DIR=""
 OUTPUT_VIDEO="comparison_video.mp4"
-FPS=20
 COLORMAP="viridis"
 LIST_FILES=false
 CONTAINER_NAME="anycam:latest"
@@ -26,7 +25,6 @@ show_help() {
     echo ""
     echo "Options:"
     echo "  -o, --output FILE     Output video filename (default: comparison_video.mp4)"
-    echo "  --fps FPS            Output video FPS (default: 30)"
     echo "  --colormap NAME      Depth colormap: viridis, plasma, inferno, magma, jet"
     echo "  --list-files         List found files and exit"
     echo "  --container NAME     Docker container name (default: anycam:latest)"
@@ -44,6 +42,9 @@ show_help() {
     echo ""
     echo "  # Debug file matching"
     echo "  $0 --list-files data/video.mp4 outputs/"
+    echo ""
+    echo "  # Debug file matching"
+    echo "  $0 --list-files data/video.mp4 outputs/"
 }
 
 # Parse arguments
@@ -58,8 +59,8 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --fps)
-            FPS="$2"
-            shift 2
+            echo "Error: FPS option removed. Video uses source frame rate."
+            exit 1
             ;;
         --colormap)
             COLORMAP="$2"
@@ -133,7 +134,6 @@ echo "============================="
 echo "Input:        $INPUT_VIDEO"
 echo "Output Dir:   $OUTPUT_DIR"
 echo "Output Video: $OUTPUT_VIDEO"
-echo "FPS:          $FPS"
 echo "Colormap:     $COLORMAP"
 echo "Container:    $CONTAINER_NAME"
 echo ""
@@ -153,7 +153,7 @@ if [ -f "$INPUT_VIDEO" ]; then
         -v "$(dirname "$OUTPUT_VIDEO"):/workspace/output" \
         -v "$(pwd)/create_simple_video.py:/workspace/create_simple_video.py" \
         "$CONTAINER_NAME" \
-        bash -c "cd /workspace && python3 /workspace/create_simple_video.py '/workspace/$(basename "$INPUT_VIDEO")' /workspace/output_dir -o '/workspace/output/$(basename "$OUTPUT_VIDEO")' --fps $FPS --colormap $COLORMAP$([ "$LIST_FILES" = true ] && echo " --list-files" || echo "")"
+        bash -c "cd /workspace && python3 /workspace/create_simple_video.py '/workspace/$(basename "$INPUT_VIDEO")' /workspace/output_dir -o '/workspace/output/$(basename "$OUTPUT_VIDEO")' --colormap $COLORMAP$([ "$LIST_FILES" = true ] && echo " --list-files" || echo "")"
 else
     # If input is a directory, mount it normally
     docker run --rm \
@@ -162,7 +162,7 @@ else
         -v "$(dirname "$OUTPUT_VIDEO"):/workspace/output" \
         -v "$(pwd)/create_simple_video.py:/workspace/create_simple_video.py" \
         "$CONTAINER_NAME" \
-        bash -c "cd /workspace && python3 /workspace/create_simple_video.py /workspace/input_frames /workspace/output_dir -o '/workspace/output/$(basename "$OUTPUT_VIDEO")' --fps $FPS --colormap $COLORMAP$([ "$LIST_FILES" = true ] && echo " --list-files" || echo "")"
+        bash -c "cd /workspace && python3 /workspace/create_simple_video.py /workspace/input_frames /workspace/output_dir -o '/workspace/output/$(basename "$OUTPUT_VIDEO")' --colormap $COLORMAP$([ "$LIST_FILES" = true ] && echo " --list-files" || echo "")"
 fi
 
 # Check if the video was created and copy it to the host

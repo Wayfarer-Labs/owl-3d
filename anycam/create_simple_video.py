@@ -246,19 +246,23 @@ def create_simple_video(input_path, output_dir, output_video, fps=30, colormap='
         
         print(f"Found {len(frames)} frames and {len(depth_files)} depth maps")
         
-        # Get common frame indices
+        # Original logic for when framerates match
         frame_indices = {idx for idx, _ in frames}
         depth_indices = set(depth_files.keys())
         common_indices = sorted(frame_indices.intersection(depth_indices))
         
         if not common_indices:
             print("No matching frame and depth indices found!")
+            print("You might need to specify --original-fps and --processing-fps parameters")
+            print("Or use --frame-skip for simple index-based mapping")
+            print(f"Frame indices: {sorted(list(frame_indices))[:10]}...")
+            print(f"Depth indices: {sorted(list(depth_indices))[:10]}...")
             return False
         
-        print(f"Creating video with {len(common_indices)} matched frames")
-        
-        # Create frame lookup
         frame_dict = {idx: frame_path for idx, frame_path in frames}
+        depth_to_frame_mapping = None
+    
+        print(f"Creating video with {len(common_indices)} matched frames")
         
         # Create subdirectory for side-by-side frames
         output_frames_dir = os.path.join(temp_dir, "output_frames")
@@ -267,15 +271,21 @@ def create_simple_video(input_path, output_dir, output_video, fps=30, colormap='
         print(f"Creating side-by-side frames in {output_frames_dir}")
         
         # Process each frame
-        for i, idx in enumerate(tqdm(common_indices, desc="Processing frames")):
+        for i, depth_idx in enumerate(tqdm(common_indices, desc="Processing frames")):
             try:
+                # Get corresponding frame index
+                if depth_to_frame_mapping:
+                    frame_idx = depth_to_frame_mapping[depth_idx]
+                else:
+                    frame_idx = depth_idx
+                
                 # Load original frame
-                original_frame_path = frame_dict[idx]
+                original_frame_path = frame_dict[frame_idx]
                 original_img = Image.open(original_frame_path)
                 original_array = np.array(original_img)
                 
                 # Load and process depth
-                depth_path = depth_files[idx]
+                depth_path = depth_files[depth_idx]
                 depth_colored = load_depth_image(depth_path, colormap)
                 
                 # Convert depth to PIL Image and resize to match original
