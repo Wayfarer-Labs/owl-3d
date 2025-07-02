@@ -15,12 +15,30 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     cmake \
     ninja-build \
-    # libgl1-mesa-glx \
-    # libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install OpenGL and X11 libraries separately to handle potential conflicts
+RUN apt-get update && apt-get install -y \
+    libgl1 \
+    libgl1-mesa-dri \
+    libglib2.0-0 \
     libsm6 \
     libxext6 \
-    libxrender-dev \
+    libxrender1 \
     libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install additional GUI libraries if needed
+RUN apt-get update && apt-get install -y \
+    libglu1-mesa \
+    libxi6 \
+    libxrandr2 \
+    libxss1 \
+    libxcursor1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxtst6 \
+    libxkbcommon0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Miniconda
@@ -62,7 +80,8 @@ RUN chmod +x download_checkpoints.sh && \
 
 # Copy test script and make it executable
 COPY test_installation.sh /workspace/
-RUN chmod +x /workspace/test_installation.sh
+COPY process_video.sh /workspace/
+RUN chmod +x /workspace/test_installation.sh /workspace/process_video.sh
 
 # Create a startup script that activates the environment
 RUN echo '#!/bin/bash\nsource activate anycam\nexec "$@"' > /usr/local/bin/entrypoint.sh && \
