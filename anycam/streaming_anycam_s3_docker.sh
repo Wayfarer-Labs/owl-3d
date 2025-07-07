@@ -124,10 +124,7 @@ run_docker() {
     # Build docker command
     local docker_cmd=(
         docker run --rm
-        -e AWS_ACCESS_KEY_ID
-        -e AWS_SECRET_ACCESS_KEY
-        -e AWS_REGION
-        -e AWS_ENDPOINT_URL
+        --env-file .env
         -v "$script_dir:/workspace/scripts:ro"
         -w /workspace
     )
