@@ -65,7 +65,7 @@ def get_presigned_url(s3, bucket, key, expires=3600):
         ExpiresIn=expires,
     )
 
-def process_batch(anycam, frames, batch_index, video_name):
+def process_batch(model, frames, batch_index, video_name):
     """
     Placeholder for your batch processing logic.
     `frames` is a list/array of shape [batch_size, H, W, C]
@@ -75,9 +75,9 @@ def process_batch(anycam, frames, batch_index, video_name):
     # e.g. run inference on stack of frames, save outputs, etc.
     # Example: just save the batch as a video
     output_filename = os.path.join(OUTPUT_DIR, f"{video_name}_batch_{batch_index}.mp4")
-    print(f"    → saving batch {batch_index} to {output_filename}")
+    # print(f"    → saving batch {batch_index} to {output_filename}")
     # imageio.mimwrite(output_filename, frames, fps=30, quality=8)
-    process_frames_with_anycam(frames, output_dir=OUTPUT_DIR, input_video_name=video_name)
+    process_frames_with_anycam(model, frames)
 
 def process_streaming_video(model, url, batch_size):
     """
@@ -174,7 +174,7 @@ def main():
     # Stream & batch-process each
     for key in tqdm(keys, desc="Videos", unit="video"):
         url = get_presigned_url(s3, args.bucket, key)
-        process_streaming_video(url, batch_size=args.frame_batch_size)
+        process_streaming_video(model, url, batch_size=args.frame_batch_size)
 
 if __name__ == "__main__":
     start = time.time()
