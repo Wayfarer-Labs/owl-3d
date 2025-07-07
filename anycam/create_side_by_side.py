@@ -54,8 +54,6 @@ def main():
         dnorm = cv2.normalize(depth, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
         dnorm = dnorm.astype(np.uint8)
 
-        print(dnorm.shape, dnorm.dtype)
-        print(cmap, type(cmap))
         depth_color = cv2.applyColorMap(dnorm, cmap)
 
         # Concatenate side by side
