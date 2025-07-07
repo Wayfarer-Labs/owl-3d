@@ -75,6 +75,8 @@ WORKDIR /workspace/anycam
 RUN /bin/bash -c "source activate anycam && \
     pip install -r requirements.txt && pip install pillow matplotlib numpy"
 
+RUN /bin/bash -c "source activate anycam && \
+    pip install opencv-python"
 # Make download script executable and download pretrained models
 RUN chmod +x download_checkpoints.sh && \
     /bin/bash -c "source activate anycam && \
