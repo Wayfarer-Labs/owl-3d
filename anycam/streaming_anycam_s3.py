@@ -31,6 +31,8 @@ import imageio
 import ffmpeg
 import numpy as np
 
+from anycam_hub_processor import process_frames_with_anycam, load_anycam_model  # Assuming this is your AnyCam processing function
+
 # Create output directory from environment or default to 'outputs'
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "outputs")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -63,7 +65,7 @@ def get_presigned_url(s3, bucket, key, expires=3600):
         ExpiresIn=expires,
     )
 
-def process_batch(frames, batch_index, video_name):
+def process_batch(anycam, frames, batch_index, video_name):
     """
     Placeholder for your batch processing logic.
     `frames` is a list/array of shape [batch_size, H, W, C]
@@ -75,8 +77,9 @@ def process_batch(frames, batch_index, video_name):
     output_filename = os.path.join(OUTPUT_DIR, f"{video_name}_batch_{batch_index}.mp4")
     print(f"    → saving batch {batch_index} to {output_filename}")
     # imageio.mimwrite(output_filename, frames, fps=30, quality=8)
+    process_frames_with_anycam(frames, output_dir=OUTPUT_DIR, input_video_name=video_name)
 
-def process_streaming_video(url, batch_size):
+def process_streaming_video(model, url, batch_size):
     """
     Stream from `url` via ffmpeg, accumulate `batch_size` frames, then process each batch.
     """
@@ -117,13 +120,13 @@ def process_streaming_video(url, batch_size):
 
         batch.append(frame)
         if len(batch) >= batch_size:
-            process_batch(batch, batch_idx, video_name)
+            process_batch(model, batch, batch_idx, video_name)
             batch = []
             batch_idx += 1
 
     # final partial batch
     if batch:
-        process_batch(batch, batch_idx, video_name)
+        process_batch(model, batch, batch_idx, video_name)
 
     process.wait()
     if process.returncode != 0:
@@ -160,6 +163,12 @@ def main():
     keys = list_video_keys(s3, args.bucket, args.prefix, args.ext)
     if not keys:
         print("No videos found. Exiting.")
+        return
+
+    model = load_anycam_model()
+
+    if model is None:
+        print("Failed to load AnyCam model. Exiting.")
         return
 
     # Stream & batch-process each

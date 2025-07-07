@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
+FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
@@ -54,10 +54,10 @@ ENV CONDA_DEFAULT_ENV=anycam
 ENV PATH=/opt/conda/envs/anycam/bin:$PATH
 
 # Clone the anycam repository directly into /workspace/anycam
-RUN git clone  --recursive https://github.com/bmahlbrand/anycam.git /workspace/anycam
+RUN git clone --recursive https://github.com/bmahlbrand/anycam.git /workspace/anycam
 
 # Set working directory
-WORKDIR /workspace 
+WORKDIR /workspace
  
 # Change to anycam directory
 WORKDIR /workspace/anycam
