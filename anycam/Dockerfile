@@ -53,43 +53,28 @@ RUN conda create -n anycam python=3.11 -y
 ENV CONDA_DEFAULT_ENV=anycam
 ENV PATH=/opt/conda/envs/anycam/bin:$PATH
 
-# Activate environment and install PyTorch with CUDA 12.4 support
-RUN /bin/bash -c "source activate anycam && \
-    pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu124"
-
-# Install CUDA toolkit for compilation
-RUN /bin/bash -c "source activate anycam && \
-    conda install -c nvidia cuda-toolkit -y"
+# Clone the anycam repository directly into /workspace/anycam
+RUN git clone  --recursive https://github.com/bmahlbrand/anycam.git /workspace/anycam
 
 # Set working directory
-WORKDIR /workspace
-
-# Clone the anycam repository
-# RUN git clone --recursive https://github.com/Brummi/anycam.git
-RUN git clone --recursive https://github.com/bmahlbrand/anycam.git
-
+WORKDIR /workspace 
+ 
 # Change to anycam directory
 WORKDIR /workspace/anycam
 
-# Copy and install requirements
+# Activate environment and install PyTorch with CUDA 12.4 support
 RUN /bin/bash -c "source activate anycam && \
-    pip install -r requirements.txt && pip install pillow matplotlib numpy opencv-python" 
+    pip install -r requirements.txt"
 
 # Make download script executable and download pretrained models
 RUN chmod +x download_checkpoints.sh && \
     /bin/bash -c "source activate anycam && \
     ./download_checkpoints.sh anycam_seq8"
 
+RUN /bin/bash -c "source activate anycam && \
+    pip install ffmpeg-python"
 # Copy test script and make it executable
-COPY test_installation.sh /workspace/
-COPY process_video.sh /workspace/
-ARG INCUBATOR_VER=unknown
-
-# COPY create_comparison_video.py /workspace/
-# COPY create_comparison_video.sh /workspace/
-# COPY create_simple_video.py /workspace/
-# COPY create_simple_video.sh /workspace/
-# RUN chmod +x /workspace/test_installation.sh /workspace/process_video.sh /workspace/create_comparison_video.sh /workspace/create_simple_video.sh
+COPY streaming_anycam_s3.py /workspace/anycam/
 COPY create_side_by_side.py /workspace/anycam/
 RUN chmod +x /workspace/anycam/create_side_by_side.py
 COPY create_side_by_side.sh /workspace/anycam/
@@ -106,4 +91,3 @@ CMD ["/bin/bash"]
 
 # Expose port for rerun.io web viewer (optional)
 EXPOSE 9090
-
