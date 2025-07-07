@@ -31,6 +31,10 @@ import imageio
 import ffmpeg
 import numpy as np
 
+# Create output directory from environment or default to 'outputs'
+OUTPUT_DIR = os.getenv("OUTPUT_DIR", "outputs")
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
 def parse_args():
     p = argparse.ArgumentParser(
         description="Stream-download & batch-process videos from S3"
@@ -67,6 +71,10 @@ def process_batch(frames, batch_index, video_name):
     print(f"    → processing batch {batch_index} ({len(frames)} frames) of {video_name}")
     # TODO: replace with your real batch work:
     # e.g. run inference on stack of frames, save outputs, etc.
+    # Example: just save the batch as a video
+    output_filename = os.path.join(OUTPUT_DIR, f"{video_name}_batch_{batch_index}.mp4")
+    print(f"    → saving batch {batch_index} to {output_filename}")
+    # imageio.mimwrite(output_filename, frames, fps=30, quality=8)
 
 def process_streaming_video(url, batch_size):
     """

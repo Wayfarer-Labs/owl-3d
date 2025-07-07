@@ -132,7 +132,10 @@ run_docker() {
     if [ ${#GPU_FLAGS[@]} -gt 0 ]; then
         docker_cmd+=("${GPU_FLAGS[@]}")
     fi
+    # Mount host outputs directory and pass OUTPUT_DIR to container
     docker_cmd+=(
+        -v "${PWD}/outputs:/workspace/anycam/outputs"
+        -e "OUTPUT_DIR=/workspace/anycam/outputs"
         "$CONTAINER_NAME"
         /bin/bash -c "python /workspace/scripts/streaming_anycam_s3.py \
             --bucket '$BUCKET' \

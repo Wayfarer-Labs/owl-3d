@@ -57,6 +57,7 @@ Options:
   --ba_refinement     Enable bundle adjustment refinement
   --max_frames N      Process only first N frames
   --resize_height N   Resize frames to height N (maintains aspect ratio)
+    --batch_size N      Number of frames to process per video (batch size)
   --container NAME    Docker container name (default: anycam-hub:latest)
   --help              Show this help message
 
@@ -107,6 +108,15 @@ parse_args() {
                     shift 2
                 else
                     print_error "Invalid value for --resize_height: $2"
+                    exit 1
+                fi
+                ;;
+            --batch_size)
+                if [[ -n $2 && $2 =~ ^[0-9]+$ ]]; then
+                    EXTRA_ARGS="$EXTRA_ARGS --batch_size $2"
+                    shift 2
+                else
+                    print_error "Invalid value for --batch_size: $2"
                     exit 1
                 fi
                 ;;
