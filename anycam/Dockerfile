@@ -73,10 +73,8 @@ WORKDIR /workspace/anycam
 
 # Copy and install requirements
 RUN /bin/bash -c "source activate anycam && \
-    pip install -r requirements.txt && pip install pillow matplotlib numpy"
+    pip install -r requirements.txt && pip install pillow matplotlib numpy opencv-python" 
 
-RUN /bin/bash -c "source activate anycam && \
-    pip install opencv-python"
 # Make download script executable and download pretrained models
 RUN chmod +x download_checkpoints.sh && \
     /bin/bash -c "source activate anycam && \
@@ -87,12 +85,15 @@ COPY test_installation.sh /workspace/
 COPY process_video.sh /workspace/
 ARG INCUBATOR_VER=unknown
 
-COPY create_comparison_video.py /workspace/
-COPY create_comparison_video.sh /workspace/
-COPY create_simple_video.py /workspace/
-COPY create_simple_video.sh /workspace/
-RUN chmod +x /workspace/test_installation.sh /workspace/process_video.sh /workspace/create_comparison_video.sh /workspace/create_simple_video.sh
-
+# COPY create_comparison_video.py /workspace/
+# COPY create_comparison_video.sh /workspace/
+# COPY create_simple_video.py /workspace/
+# COPY create_simple_video.sh /workspace/
+# RUN chmod +x /workspace/test_installation.sh /workspace/process_video.sh /workspace/create_comparison_video.sh /workspace/create_simple_video.sh
+COPY create_side_by_side.py /workspace/anycam/
+RUN chmod +x /workspace/anycam/create_side_by_side.py
+COPY create_side_by_side.sh /workspace/anycam/
+RUN chmod +x /workspace/anycam/create_side_by_side.sh
 # Create a startup script that activates the environment
 RUN echo '#!/bin/bash\nsource activate anycam\nexec "$@"' > /usr/local/bin/entrypoint.sh && \
     chmod +x /usr/local/bin/entrypoint.sh
