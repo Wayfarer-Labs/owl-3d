@@ -18,6 +18,7 @@ BUCKET=""
 PREFIX=""
 EXT="mp4"
 FRAME_BATCH_SIZE=50
+TARGET_BUCKET="cod-yt-playlist-spmem-tensors"
 
 # Colors for output
 RED='\033[0;31m'
@@ -60,6 +61,8 @@ parse_args() {
         case $1 in
             --bucket)
                 BUCKET="$2"; shift 2;;
+            --target-bucket)
+                TARGET_BUCKET="$2"; shift 2;;
             --prefix)
                 PREFIX="$2"; shift 2;;
             --ext)
@@ -87,6 +90,7 @@ validate_inputs() {
     print_info "Prefix: $PREFIX"
     print_info "Extension: $EXT"
     print_info "Frame batch size: $FRAME_BATCH_SIZE"
+    print_info "Target bucket: $TARGET_BUCKET"
     print_info "Container: $CONTAINER_NAME"
 }
 
@@ -141,7 +145,8 @@ run_docker() {
             --bucket '$BUCKET' \
             --prefix '$PREFIX' \
             --ext '$EXT' \
-            --frame-batch-size $FRAME_BATCH_SIZE"
+            --frame-batch-size $FRAME_BATCH_SIZE \
+            --target-bucket '$TARGET_BUCKET'"
     )
 
     print_info "Running command: ${docker_cmd[*]}"

@@ -74,7 +74,7 @@ RUN chmod +x download_checkpoints.sh && \
 RUN /bin/bash -c "source activate anycam && \
     pip install ffmpeg-python"
 # Copy test script and make it executable
-COPY streaming_anycam_s3.py  /workspace/anycam/
+COPY streaming_anycam_s3.py /workspace/anycam/
 COPY create_side_by_side.py /workspace/anycam/
 RUN chmod +x /workspace/anycam/create_side_by_side.py
 COPY create_side_by_side.sh /workspace/anycam/

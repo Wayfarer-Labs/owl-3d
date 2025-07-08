@@ -30,12 +30,48 @@ import imageio
 
 import ffmpeg
 import numpy as np
+import torch
+import io
+from PIL import Image
+from botocore.exceptions import ClientError
 
 from anycam_hub_processor import process_frames_with_anycam, load_anycam_model  # Assuming this is your AnyCam processing function
 
 # Create output directory from environment or default to 'outputs'
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "outputs")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+# helper to upload per-frame data to S3
+def upload_frame_data(s3_client, bucket, video_name, idx, frame_np, depth, pose, trajectory):
+    idx_str = f"{idx:06d}"
+    prefix = f"{video_name}/"
+    keys = {
+        'frame': prefix + f"frame_{idx_str}.png",
+        'depth': prefix + f"depth_{idx_str}.pt",
+        'pose': prefix + f"pose_3x3_{idx_str}.pt",
+        'trajectory': prefix + f"trajectory_{idx_str}.pt"
+    }
+    # prepare tensors
+    for kind, key in keys.items():
+        # skip existing
+        try:
+            s3_client.head_object(Bucket=bucket, Key=key)
+            print(f"Skipping existing {key}")
+            continue
+        except ClientError as e:
+            if e.response['Error']['Code'] != '404': raise
+        # upload content
+        buf = io.BytesIO()
+        if kind == 'frame':
+            Image.fromarray(frame_np).save(buf, format='PNG')
+            body = buf.getvalue()
+            s3_client.put_object(Bucket=bucket, Key=key, Body=body, ContentType='image/png')
+        else:
+            tensor = {'depth': depth, 'pose': pose, 'trajectory': trajectory}[kind] if kind in ['depth','pose','trajectory'] else None
+            torch.save(tensor, buf)
+            s3_client.put_object(Bucket=bucket, Key=key, Body=buf.getvalue())
+        print(f"Uploaded {key}")
+
 
 def parse_args():
     p = argparse.ArgumentParser(
@@ -46,6 +82,7 @@ def parse_args():
     p.add_argument("--ext",                default="mp4",  help="Video file extension filter")
     p.add_argument("--frame-batch-size",  type=int, default=50,
                    help="Number of frames per batch to process")
+    p.add_argument("--target-bucket", required=True, help="S3 bucket for uploads")
     return p.parse_args()
 
 def list_video_keys(s3, bucket, prefix, ext):
@@ -65,7 +102,7 @@ def get_presigned_url(s3, bucket, key, expires=3600):
         ExpiresIn=expires,
     )
 
-def process_batch(model, frames, batch_index, video_name):
+def process_batch(model, frames, batch_index, video_name, s3_client, target_bucket, start_idx=0):
     """
     Placeholder for your batch processing logic.
     `frames` is a list/array of shape [batch_size, H, W, C]
@@ -77,9 +114,21 @@ def process_batch(model, frames, batch_index, video_name):
     output_filename = os.path.join(OUTPUT_DIR, f"{video_name}_batch_{batch_index}.mp4")
     # print(f"    → saving batch {batch_index} to {output_filename}")
     # imageio.mimwrite(output_filename, frames, fps=30, quality=8)
-    process_frames_with_anycam(model, frames)
+    results = process_frames_with_anycam(model, frames)
 
-def process_streaming_video(model, url, batch_size):
+     # upload each frame's data
+     # compute global frame index offset by start_idx
+    base_idx = start_idx + batch_index * len(frames)
+    for i, frame in enumerate(frames):
+        global_idx = base_idx + i
+        depth = results.get('depths')[i]
+        proj = results.get('projection_matrix')
+        # extract 3x3 pose
+        pose = torch.from_numpy(proj)[:3, :3] if isinstance(proj, np.ndarray) else proj[:3, :3]
+        traj = results.get('trajectory')[i]
+        # upload_frame_data(s3_client, target_bucket, video_name, global_idx, frame, depth, pose, traj)
+
+def process_streaming_video(model, url, batch_size, s3_client, target_bucket):
     """
     Stream from `url` via ffmpeg, accumulate `batch_size` frames, then process each batch.
     """
@@ -93,18 +142,41 @@ def process_streaming_video(model, url, batch_size):
     width  = int(video_stream['width'])
     height = int(video_stream['height'])
 
+    # determine starting frame index from existing uploads
+    prefix = f"{video_name}/frame_"
+    resp = s3_client.list_objects_v2(Bucket=target_bucket, Prefix=prefix)
+    existing = resp.get('Contents', [])
+    if existing:
+        idxs = [int(obj['Key'].split('_')[-1].split('.')[0]) for obj in existing]
+        start_idx = max(idxs) + 1
+        print(f"Resuming from frame index {start_idx}")
+    else:
+        start_idx = 0
+
     # 2) Launch ffmpeg as a subprocess, outputting rawvideo RGB24 to stdout
-    process = (
-        ffmpeg
-        .input(url)
-        .output('pipe:', format='rawvideo', pix_fmt='rgb24')
-        .run_async(pipe_stdout=True, pipe_stderr=True)
-    )
+    # launch ffmpeg process, skipping to start_idx by frame number if resuming
+    if start_idx > 0:
+        process = (
+            ffmpeg
+            .input(url)
+            .filter('select', f'gte(n,{start_idx})')
+            .filter('setpts', 'PTS-STARTPTS')
+            .output('pipe:', format='rawvideo', pix_fmt='rgb24')
+            .run_async(pipe_stdout=True, pipe_stderr=True)
+        )
+    else:
+        process = (
+            ffmpeg
+            .input(url)
+            .output('pipe:', format='rawvideo', pix_fmt='rgb24')
+            .run_async(pipe_stdout=True, pipe_stderr=True)
+        )
 
     frame_size = width * height * 3  # bytes per frame
+    # initialize batch and batch counter
     batch = []
     batch_idx = 0
-
+    # read frames
     while True:
         # read exactly one frame
         in_bytes = process.stdout.read(frame_size)
@@ -120,13 +192,13 @@ def process_streaming_video(model, url, batch_size):
 
         batch.append(frame)
         if len(batch) >= batch_size:
-            process_batch(model, batch, batch_idx, video_name)
+            process_batch(model, batch, batch_idx, video_name, s3_client, target_bucket, start_idx)
             batch = []
             batch_idx += 1
 
     # final partial batch
     if batch:
-        process_batch(model, batch, batch_idx, video_name)
+        process_batch(model, batch, batch_idx, video_name, s3_client, target_bucket, start_idx)
 
     process.wait()
     if process.returncode != 0:
@@ -174,7 +246,8 @@ def main():
     # Stream & batch-process each
     for key in tqdm(keys, desc="Videos", unit="video"):
         url = get_presigned_url(s3, args.bucket, key)
-        process_streaming_video(model, url, batch_size=args.frame_batch_size)
+        process_streaming_video(model, url, batch_size=args.frame_batch_size,
+                                s3_client=s3, target_bucket=args.target_bucket)
 
 if __name__ == "__main__":
     start = time.time()
