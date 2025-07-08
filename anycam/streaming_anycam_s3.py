@@ -34,6 +34,7 @@ import torch
 import io
 from PIL import Image
 from botocore.exceptions import ClientError
+import math
 
 from anycam_hub_processor import process_frames_with_anycam, load_anycam_model  # Assuming this is your AnyCam processing function
 
@@ -152,6 +153,16 @@ def process_streaming_video(model, url, batch_size, s3_client, target_bucket):
         print(f"Resuming from frame index {start_idx}")
     else:
         start_idx = 0
+
+    # (fps-based batch counting removed)
+    # compute batch count if nb_frames metadata is available
+    if 'nb_frames' in video_stream and video_stream['nb_frames'].isdigit():
+        total_frames = int(video_stream['nb_frames'])
+        remaining = max(0, total_frames - start_idx)
+        total_batches = math.ceil(remaining / batch_size)
+        print(f"Remaining frames: {remaining}, batches: {total_batches} (batch size={batch_size})")
+    else:
+        print("Batch count unavailable (nb_frames missing)")
 
     # 2) Launch ffmpeg as a subprocess, outputting rawvideo RGB24 to stdout
     # launch ffmpeg process, skipping to start_idx by frame number if resuming
