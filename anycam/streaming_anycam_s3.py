@@ -37,6 +37,7 @@ from botocore.exceptions import ClientError
 import math
 
 from anycam_hub_processor import process_frames_with_anycam, load_anycam_model  # Assuming this is your AnyCam processing function
+from online_tsdf_pipeline import OnlineTSDFColorPipeline
 
 # Create output directory from environment or default to 'outputs'
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "outputs")
@@ -116,7 +117,7 @@ def get_fps(url):
     fps = float(num) / float(den)
     return fps
 
-def process_batch(model, frames, batch_index, total_batches, video_name, s3_client, target_bucket, start_idx=0):
+def process_batch(model, frames, batch_index, video_name, s3_client, target_bucket, start_idx=0, pipeline=None):
     """
     Placeholder for your batch processing logic.
     `frames` is a list/array of shape [batch_size, H, W, C]
@@ -129,19 +130,31 @@ def process_batch(model, frames, batch_index, total_batches, video_name, s3_clie
     # print(f"    → saving batch {batch_index} to {output_filename}")
     # imageio.mimwrite(output_filename, frames, fps=30, quality=8)
     results = process_frames_with_anycam(model, frames)
+    # update TSDF color pipeline
+    if pipeline is not None:
+        # collect depth maps and poses
+        depths = results.get('depths')  # tensor or list
+        trajs = results.get('trajectory')  # assume Nx4x4
+        # convert depths to numpy list
+        depth_maps = [d.cpu().numpy() if hasattr(d, 'cpu') else d for d in depths]
+        # use rgb frames as numpy arrays
+        rgb_maps = frames
+        # ensure poses is tensor list
+        pose_tensor = trajs if torch.is_tensor(trajs) else torch.stack([torch.from_numpy(p) for p in trajs])
+        pipeline.update_batch(depth_maps, rgb_maps, pose_tensor)
 
-     # upload each frame's data
-     # compute global frame index offset by start_idx
-    base_idx = start_idx + batch_index * len(frames)
-    for i, frame in tqdm(enumerate(frames), desc=f"Batch {batch_index+1}/{total_batches}", unit="frame"):
-    # for i, frame in enumerate(frames):
-        global_idx = base_idx + i
-        depth = results.get('depths')[i]
-        proj = results.get('projection_matrix')
-        # extract 3x3 pose
-        pose = torch.from_numpy(proj)[:3, :3] if isinstance(proj, np.ndarray) else proj[:3, :3]
-        traj = results.get('trajectory')[i]
-        upload_frame_data(s3_client, target_bucket, video_name, global_idx, frame, depth, pose, traj)
+    # upload each frame's data
+    # compute global frame index offset by start_idx
+    # base_idx = start_idx + batch_index * len(frames)
+    # for i, frame in tqdm(enumerate(frames), desc=f"Batch {batch_index+1}/{total_batches}", unit="frame"):
+    # # for i, frame in enumerate(frames):
+    #     global_idx = base_idx + i
+    #     depth = results.get('depths')[i]
+    #     proj = results.get('projection_matrix')
+    #     # extract 3x3 pose
+    #     pose = torch.from_numpy(proj)[:3, :3] if isinstance(proj, np.ndarray) else proj[:3, :3]
+    #     traj = results.get('trajectory')[i]
+    #     upload_frame_data(s3_client, target_bucket, video_name, global_idx, frame, depth, pose, traj)
 
 def process_streaming_video(model, url, batch_size, s3_client, target_bucket):
     """
@@ -182,6 +195,9 @@ def process_streaming_video(model, url, batch_size, s3_client, target_bucket):
     start_seconds = start_idx / fps
 
     # 2) Launch ffmpeg as a subprocess, outputting rawvideo RGB24 to stdout
+    # initialize TSDF color pipeline (identity intrinsics)
+    intr = torch.eye(3)
+    tsdfpipeline = OnlineTSDFColorPipeline(camera_intrinsics=intr, device='cuda' if torch.cuda.is_available() else 'cpu')
     # launch ffmpeg process, skipping to start_idx by frame number if resuming
     if start_idx > 0:
         process = (
@@ -219,15 +235,24 @@ def process_streaming_video(model, url, batch_size, s3_client, target_bucket):
 
         batch.append(frame)
         if len(batch) >= batch_size:
-            process_batch(model, batch, batch_idx, total_batches, video_name, s3_client, target_bucket, start_idx)
+            process_batch(model, batch, batch_idx, video_name, s3_client, target_bucket, start_idx, pipeline=tsdfpipeline)
             batch = []
             batch_idx += 1
 
     # final partial batch
     if batch:
-        process_batch(model, batch, batch_idx, total_batches, video_name, s3_client, target_bucket, start_idx)
+        process_batch(model, batch, batch_idx, video_name, s3_client, target_bucket, start_idx, pipeline=tsdfpipeline)
 
     process.wait()
+    # extract and upload static colored point cloud as a tensor to S3
+    pc_color = pipeline.extract_colored_pointcloud(min_weight_threshold=1.0)
+    buf_pc = io.BytesIO()
+    torch.save(pc_color, buf_pc)
+    buf_pc.seek(0)
+    s3_key = f"{video_name}/static_color_pointcloud.pt"
+    s3_client.put_object(Bucket=target_bucket, Key=s3_key, Body=buf_pc.getvalue())
+    print(f"Uploaded static colored pointcloud to s3://{target_bucket}/{s3_key}")
+
     if process.returncode != 0:
         err = process.stderr.read().decode('utf8', errors='ignore')
         print(f"ffmpeg exited {process.returncode}:\n{err}")
