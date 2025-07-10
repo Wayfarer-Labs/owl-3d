@@ -16,6 +16,8 @@ RUN apt-get update && apt-get install -y \
     cmake \
     ninja-build \
     ffmpeg \
+    ca-certificates \
+    && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Install OpenGL and X11 libraries separately to handle potential conflicts
@@ -72,9 +74,11 @@ RUN chmod +x download_checkpoints.sh && \
     ./download_checkpoints.sh anycam_seq8"
 
 RUN /bin/bash -c "source activate anycam && \
-    pip install ffmpeg-python"
+    pip install ffmpeg-python opencv-python-headless open3d==0.18.0"
 # Copy test script and make it executable
-COPY streaming_anycam_s3.py /workspace/anycam/
+COPY streaming_anycam_s3.py  /workspace/anycam/
+COPY test_s3_stream_vis.py /workspace/anycam/
+COPY online_tsdf_pipeline.py  /workspace/anycam/
 COPY create_side_by_side.py /workspace/anycam/
 RUN chmod +x /workspace/anycam/create_side_by_side.py
 COPY create_side_by_side.sh /workspace/anycam/
