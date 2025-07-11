@@ -1,0 +1,69 @@
+# Dev container specific ignores
+.devcontainer/
+.git/
+.gitignore
+*.md
+README*
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Environment variables
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Output directories (will be mounted)
+outputs/
+output_frames/
+data/
+*.ply
+*.mp4
+*.png
+*.jpg
+*.jpeg
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Logs
+*.log

@@ -17,6 +17,14 @@ RUN apt-get update && apt-get install -y \
     ninja-build \
     ffmpeg \
     ca-certificates \
+    vim \
+    nano \
+    htop \
+    tmux \
+    ssh \
+    rsync \
+    zip \
+    unzip \
     && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
@@ -68,13 +76,14 @@ WORKDIR /workspace/anycam
 RUN /bin/bash -c "source activate anycam && \
     pip install -r requirements.txt"
 
+# Install additional development dependencies
+RUN /bin/bash -c "source activate anycam && \
+    pip install ffmpeg-python opencv-python-headless open3d==0.18.0"
+
 # Make download script executable and download pretrained models
 RUN chmod +x download_checkpoints.sh && \
     /bin/bash -c "source activate anycam && \
     ./download_checkpoints.sh anycam_seq8"
-
-RUN /bin/bash -c "source activate anycam && \
-    pip install ffmpeg-python opencv-python-headless open3d==0.18.0"
 
 # Set TORCH_HOME environment variable
 ENV TORCH_HOME=/root/.cache/torch
@@ -91,7 +100,9 @@ RUN cd /root/.cache/torch/hub/bmahlbrand_anycam && \
     echo "Anycam cache contents:" && \
     ls -la
 
+# Copy local files (these will be mounted in dev container, but included for standalone builds)
 COPY test_s3_stream_vis.py  /workspace/anycam/
+COPY streaming_anycam_s3.py /workspace/anycam/
 COPY anycam_hub_processor.py /workspace/anycam/
 COPY ply_exporter.py /workspace/anycam/
 COPY open3d_pipeline.py /workspace/anycam/
@@ -100,9 +111,19 @@ COPY create_side_by_side.py /workspace/anycam/
 RUN chmod +x /workspace/anycam/create_side_by_side.py
 COPY create_side_by_side.sh /workspace/anycam/
 RUN chmod +x /workspace/anycam/create_side_by_side.sh
-# Create a startup script that activates the environment
+
+# Configure Git (useful for development)
+RUN git config --global user.name "Developer" && \
+    git config --global user.email "dev@example.com" && \
+    git config --global init.defaultBranch main
+
+# Create conda activation script for easier development
 RUN echo '#!/bin/bash\nsource activate anycam\nexec "$@"' > /usr/local/bin/entrypoint.sh && \
     chmod +x /usr/local/bin/entrypoint.sh
+
+# Create a convenient alias for activating conda environment
+RUN echo 'alias activate-anycam="source activate anycam"' >> /root/.bashrc && \
+    echo 'source activate anycam' >> /root/.bashrc
 
 # Set the entrypoint
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
@@ -110,5 +131,5 @@ ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 # Default command
 CMD ["/bin/bash"]
 
-# Expose port for rerun.io web viewer (optional)
-EXPOSE 9090
+# Expose port for rerun.io web viewer and jupyter
+EXPOSE 9090 8888

@@ -1,0 +1,25 @@
+{
+    "configurations": [
+        {
+            "type": "debugpy",
+            "request": "launch",
+            "name": "Python: Streaming AnyCam S3",
+            "program": "${workspaceFolder}/streaming_anycam_s3.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": [
+                "--bucket",
+                "cod-yt-playlist",
+                "--ext",
+                "mp4",
+                "--frame-batch-size",
+                "50",
+                "--target-bucket",
+                "cod-yt-playlist-spmem-tensors"
+            ],
+            "env": {
+                "PYTHONPATH": "/workspace/anycam"
+            }
+        }
+    ]
+}

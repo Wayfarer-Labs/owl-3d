@@ -2,7 +2,7 @@
 
 # Build the AnyCam Docker image
 echo "Building AnyCam Docker image..."
-docker build  -t anycam:latest . 
+docker build --progress=plain -t anycam:latest . 
 
 echo "Build complete! You can now run the container with:"
 echo "  ./run_docker.sh"

@@ -1,0 +1,69 @@
+{
+	"name": "AnyCam Development Container",
+	"build": {
+		"dockerfile": "Dockerfile.dev",
+		"context": ".."
+	},
+	"runArgs": [
+		"--gpus=all",
+		"--shm-size=8g"
+		"--env-file", ".devcontainer/.env"
+	],
+	"mounts": [
+		"source=${localWorkspaceFolder},target=/workspace/anycam,type=bind",
+		"source=${localWorkspaceFolder}/data,target=/workspace/anycam/data,type=bind",
+		"source=${localWorkspaceFolder}/outputs,target=/workspace/anycam/outputs,type=bind",
+		"source=${localWorkspaceFolder}/output_frames,target=/workspace/anycam/output_frames,type=bind"
+	],
+	"workspaceFolder": "/workspace/anycam",
+	"postCreateCommand": "source activate anycam && echo 'AnyCam dev container ready!'",
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-python.python",
+				"ms-python.debugpy",
+				"ms-python.pylint",
+				"ms-python.flake8",
+				"ms-python.black-formatter",
+				"ms-toolsai.jupyter",
+				"ms-vscode.cpptools",
+				"ms-vscode.cmake-tools",
+				"ms-vscode.hexeditor",
+				"redhat.vscode-yaml",
+				"ms-vscode.vscode-json"
+			],
+			"settings": {
+				"python.defaultInterpreterPath": "/opt/conda/envs/anycam/bin/python",
+				"python.terminal.activateEnvironment": true,
+				"python.terminal.activateEnvInCurrentTerminal": true,
+				"terminal.integrated.defaultProfile.linux": "bash",
+				"terminal.integrated.profiles.linux": {
+					"bash": {
+						"path": "/bin/bash",
+						"args": ["-c", "source activate anycam && exec bash"]
+					}
+				}
+			}
+		}
+	},
+	"forwardPorts": [9090],
+	"portsAttributes": {
+		"9090": {
+			"label": "Rerun.io Web Viewer",
+			"onAutoForward": "notify"
+		}
+	},
+	"remoteUser": "root",
+	"containerEnv": {
+		"DISPLAY": ":0",
+		"TORCH_HOME": "/root/.cache/torch",
+		"PYTHONPATH": "/workspace/anycam:${PYTHONPATH}"
+	},
+	"features": {
+		"ghcr.io/devcontainers/features/git:1": {},
+		"ghcr.io/devcontainers/features/common-utils:2": {
+			"installZsh": "true",
+			"configureZshAsDefaultShell": "true"
+		}
+	}
+}

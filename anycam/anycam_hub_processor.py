@@ -15,18 +15,18 @@ from typing import Optional
 def load_anycam_model():
     """Clone AnyCam repo with submodules and load model locally."""
     import os, subprocess
-    print("Cloning or updating AnyCam repository with submodules...")
+    # print("Cloning or updating AnyCam repository with submodules...")
     cache_dir = torch.hub.get_dir()
-    repo_dir = os.path.join(cache_dir, 'Brummi_anycam')
-    if not os.path.isdir(repo_dir):
-        subprocess.check_call([
-            'git', 'clone', '--recursive',
-            'https://github.com/Brummi/anycam.git', repo_dir
-        ])
-    else:
-        subprocess.check_call([
-            'git', 'submodule', 'update', '--init', '--recursive'
-        ], cwd=repo_dir)
+    repo_dir = os.path.join(cache_dir, 'bmahlbrand_anycam')
+    # if not os.path.isdir(repo_dir):
+    #     subprocess.check_call([
+    #         'git', 'clone', '--recursive',
+    #         'https://github.com/Brummi/anycam.git', repo_dir
+    #     ])
+    # else:
+    #     subprocess.check_call([
+    #         'git', 'submodule', 'update', '--init', '--recursive'
+    #     ], cwd=repo_dir)
 
     print("Loading AnyCam model from local repository...")
     try:
@@ -43,7 +43,7 @@ def load_anycam_model():
     except Exception as e:
         raise RuntimeError(f"Failed to load AnyCam model from local repo: {e}")
 
-
+# should return resized frames, depths, uncertainties, trajectory, projection matrix
 def process_frames_with_anycam(anycam, frames: List[np.ndarray], ba_refinement: bool = False) -> Dict[str, Any]:
     """
     Process frames through AnyCam and return results.
@@ -72,7 +72,28 @@ def process_frames_with_anycam(anycam, frames: List[np.ndarray], ba_refinement: 
         if "projection_matrix" in results:
             print(f"Projection matrix shape: {results['projection_matrix'].shape if hasattr(results['projection_matrix'], 'shape') else type(results['projection_matrix'])}")
         
-        return results
+        # Convert results to CPU tensors if on GPU
+        for key in results:
+            if isinstance(results[key], torch.Tensor):
+                results[key] = results[key].cpu()
+            elif isinstance(results[key], list):
+                results[key] = [item.cpu() if isinstance(item, torch.Tensor) else item for item in results[key]]
+        
+        # Convert trajectory to numpy if it's a tensor
+        if "trajectory" in results and isinstance(results["trajectory"], torch.Tensor):
+            results["trajectory"] = results["trajectory"].numpy()
+        # Convert depths to numpy if it's a tensor
+        if "depths" in results and isinstance(results["depths"], torch.Tensor):
+            results["depths"] = results["depths"].numpy()
+        # Convert uncertainties to numpy if it's a tensor
+        if "uncertainties" in results and isinstance(results["uncertainties"], torch.Tensor):
+            results["uncertainties"] = results["uncertainties"].numpy()
+        # Convert projection matrix to numpy if it's a tensor
+        if "projection_matrix" in results and isinstance(results["projection_matrix"], torch.Tensor):
+            results["projection_matrix"] = results["projection_matrix"].numpy()
+        # check if lists and convert to numpy arrays
+
+        return np.array(frames), results["depths"], results["uncertainties"], np.array(results["trajectory"]), results["projection_matrix"]
         
     except Exception as e:
         raise RuntimeError(f"AnyCam processing failed: {e}")
